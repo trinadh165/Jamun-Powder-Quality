@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Performance Metrics - Jamun Powder Quality Evaluator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #2c3e50;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            color: white;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .nav-buttons {
+            margin-top: 20px;
+        }
+        
+        .nav-btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            text-decoration: none;
+            border-radius: 25px;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        
+        .nav-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
+        
+        .metrics-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        }
+        
+        .metric-title {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-bottom: 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: 800;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 5px;
+        }
+        
+        .metric-description {
+            color: #6c757d;
+            font-size: 0.8em;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-good {
+            background-color: #27ae60;
+        }
+        
+        .graphs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .graph-container {
+            background: white;
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: all 0.3s ease;
+        }
+        
+        .graph-container:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        }
+        
+        .graph-title {
+            font-size: 1.1em;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        .performance-timeline {
+            grid-column: 1 / -1;
+        }
+        
+        .last-updated {
+            text-align: center;
+            color: #6c757d;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .graphs-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Performance Metrics</h1>
+            <p class="subtitle">
+                Comprehensive analysis of the Jamun Powder Quality ML Model performance
+            </p>
+        </div>
+        
+        <div class="nav-buttons">
+            <a href="/" class="nav-btn">🏠 Home</a>
+        </div>
+        
+        <div class="metrics-container">
+            <!-- Key Performance Indicators -->
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-title">Model Accuracy</div>
+                    <div class="metric-value">{{ "%.2f"|format(metrics.model_performance.accuracy) }}%</div>
+                    <div class="metric-description">
+                        <span class="status-indicator status-good"></span>
+                        Exceeds 85% target
+                    </div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-title">Precision</div>
+                    <div class="metric-value">{{ "%.2f"|format(metrics.model_performance.precision) }}%</div>
+                    <div class="metric-description">Positive predictive value</div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-title">Recall</div>
+                    <div class="metric-value">{{ "%.2f"|format(metrics.model_performance.recall) }}%</div>
+                    <div class="metric-description">True positive rate</div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-title">F1 Score</div>
+                    <div class="metric-value">{{ "%.2f"|format(metrics.model_performance.f1_score) }}%</div>
+                    <div class="metric-description">Balance of precision and recall</div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-title">Training Samples</div>
+                    <div class="metric-value">{{ metrics.model_performance.training_samples }}</div>
+                    <div class="metric-description">Dataset size</div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-title">Features</div>
+                    <div class="metric-value">{{ metrics.model_performance.features }}</div>
+                    <div class="metric-description">Model parameters</div>
+                </div>
+            </div>
+
+            <!-- Graphs Section -->
+            <div class="graphs-grid">
+                <!-- Confusion Matrix -->
+                <div class="graph-container">
+                    <div class="graph-title">Confusion Matrix</div>
+                    <div id="confusion-matrix-graph"></div>
+                </div>
+                
+                <!-- Feature Importance -->
+                <div class="graph-container">
+                    <div class="graph-title">Feature Importance</div>
+                    <div id="feature-importance-graph"></div>
+                </div>
+                
+                <!-- Class Distribution -->
+                <div class="graph-container">
+                    <div class="graph-title">Quality Class Distribution</div>
+                    <div id="class-distribution-graph"></div>
+                </div>
+                
+                <!-- Performance Timeline -->
+                <div class="graph-container performance-timeline">
+                    <div class="graph-title">Model Training Progress</div>
+                    <div id="performance-timeline-graph"></div>
+                </div>
+            </div>
+            
+            <div class="last-updated">
+                📅 Last updated: {{ metrics.last_updated }}
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    
+    <!-- Pass graphs data in a JSON script tag to avoid linter issues -->
+    <script type="application/json" id="graphs-data">
+        {{ metrics.graphs|tojson|safe }}
+    </script>
+    
+    <script>
+        // Initialize graphs with error handling
+        try {
+            // Parse graphs data from JSON script tag
+            const graphsDataElement = document.getElementById('graphs-data');
+            const graphsData = JSON.parse(graphsDataElement.textContent);
+            console.log('Graphs data loaded:', graphsData);
+            
+            // Confusion Matrix
+            if (graphsData.confusion_matrix) {
+                const confusionData = typeof graphsData.confusion_matrix === 'string' 
+                    ? JSON.parse(graphsData.confusion_matrix) 
+                    : graphsData.confusion_matrix;
+                Plotly.newPlot('confusion-matrix-graph', confusionData);
+                console.log('Confusion matrix rendered');
+            } else {
+                console.log('No confusion matrix data found');
+            }
+            
+            // Feature Importance
+            if (graphsData.feature_importance) {
+                const featureData = typeof graphsData.feature_importance === 'string' 
+                    ? JSON.parse(graphsData.feature_importance) 
+                    : graphsData.feature_importance;
+                Plotly.newPlot('feature-importance-graph', featureData);
+                console.log('Feature importance rendered');
+            } else {
+                console.log('No feature importance data found');
+            }
+            
+            // Class Distribution
+            if (graphsData.class_distribution) {
+                const distributionData = typeof graphsData.class_distribution === 'string' 
+                    ? JSON.parse(graphsData.class_distribution) 
+                    : graphsData.class_distribution;
+                Plotly.newPlot('class-distribution-graph', distributionData);
+                console.log('Class distribution rendered');
+            } else {
+                console.log('No class distribution data found');
+            }
+            
+            // Performance Timeline
+            if (graphsData.performance_timeline) {
+                const timelineData = typeof graphsData.performance_timeline === 'string' 
+                    ? JSON.parse(graphsData.performance_timeline) 
+                    : graphsData.performance_timeline;
+                Plotly.newPlot('performance-timeline-graph', timelineData);
+                console.log('Performance timeline rendered');
+            } else {
+                console.log('No performance timeline data found');
+            }
+        } catch (error) {
+            console.error('Error loading graphs:', error);
+            // Display error message on page
+            document.querySelectorAll('.graph-container').forEach(container => {
+                container.innerHTML = '<div style="text-align: center; color: #e74c3c; padding: 20px;">Error loading graph data. Please refresh the page.</div>';
+            });
+        }
+    </script>
+</body>
+</html>
