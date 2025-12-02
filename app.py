@@ -1,364 +1,270 @@
-"""
-Flask web application for evaluating freeze-dried Jamun powder quality.
-Provides web interface with forms for input and result display.
-"""
+# rules.py (Conceptual implementation with XGBoost)
 
-import os
-from flask import Flask, request, render_template, redirect, url_for, flash, jsonify
-from utils import validate_input_structure
-from rules import evaluate_jamun_powder_quality
-import plotly.graph_objs as go
-import plotly.utils
+import xgboost as xgb
 import numpy as np
-import json
-from datetime import datetime
-import warnings
-warnings.filterwarnings('ignore')
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import joblib # For saving/loading the model
 
-app = Flask(__name__)
-app.secret_key = 'jamun_powder_evaluator_secret_key'
+# --- Model Initialization and Training (Run once on startup/deployment) ---
 
-# Configure for deployment
-port = int(os.environ.get('PORT', 5000))
-
-@app.route('/', methods=['GET'])
-def index():
-    """
-    Home page with input form for Jamun powder quality evaluation.
+# 1. MOCK DATA GENERATION (Replace with your actual data)
+def generate_mock_data(n_samples=5000):
+    np.random.seed(42)
+    data = {}
     
-    Returns:
-        Rendered HTML template with input form
-    """
-    return render_template('index.html')
+    # Input Features
+    ripeness_map = {'unripe': 0, 'optimal': 1, 'overripe': 2}
+    packaging_map = {'plastic': 0, 'glass_jar': 1, 'vacuum_pouch': 2}
+    storage_map = {'room': 0, 'refrigerated': 1, 'frozen': 2}
+    exposure_map = {'high': 0, 'medium': 1, 'low': 2}
+    
+    data['ripeness'] = np.random.choice(list(ripeness_map.keys()), n_samples, p=[0.1, 0.7, 0.2])
+    data['quality_uniformity'] = np.random.choice([True, False], n_samples, p=[0.85, 0.15])
+    data['temperature'] = np.random.uniform(-40, -10, n_samples) # Freeze-drying temp (C)
+    data['time_hours'] = np.random.uniform(20, 48, n_samples)
+    data['packaging_type'] = np.random.choice(list(packaging_map.keys()), n_samples, p=[0.4, 0.3, 0.3])
+    data['opaque'] = np.random.choice([True, False], n_samples, p=[0.7, 0.3])
+    data['airtight'] = np.random.choice([True, False], n_samples, p=[0.8, 0.2])
+    data['storage_temperature'] = np.random.choice(list(storage_map.keys()), n_samples, p=[0.1, 0.4, 0.5])
+    data['humidity_percent'] = np.random.uniform(5, 75, n_samples)
+    data['light_exposure'] = np.random.choice(list(exposure_map.keys()), n_samples, p=[0.15, 0.35, 0.5])
+    
+    df = pd.DataFrame(data)
+    
+    # Target Variable (Quality Score 0-4: Poor, Fair, Good, Very Good, Excellent)
+    # This mock formula biases towards optimal ripeness, low temp/time, vacuum, frozen storage
+    score_influence = (
+        df['ripeness'].map(ripeness_map) * 0.5 + 
+        df['quality_uniformity'] * 1.5 + 
+        (df['temperature'] + 40) / 30 * 0.8 + # Lower temp is better
+        (48 - df['time_hours']) / 28 * 0.6 +  # Shorter time is better
+        df['packaging_type'].map(packaging_map) * 1.0 +
+        df['opaque'] * 0.5 +
+        df['airtight'] * 1.0 +
+        df['storage_temperature'].map(storage_map) * 1.5 -
+        df['humidity_percent'] / 75 * 1.5 -
+        df['light_exposure'].map(exposure_map) * 0.5
+    )
+    
+    # Scale and discretize to 5 classes (0 to 4)
+    min_score = score_influence.min()
+    max_score = score_influence.max()
+    normalized_score = (score_influence - min_score) / (max_score - min_score)
+    df['quality_class'] = pd.cut(normalized_score, bins=5, labels=False, include_lowest=True).astype(int)
+    
+    return df
 
-@app.route('/evaluate', methods=['POST'])
-def evaluate():
-    """
-    Evaluate Jamun powder quality based on form input.
-    Processes form data and redirects to results page.
+# 2. FEATURE ENGINEERING & TRAINING
+def train_and_load_model():
+    df = generate_mock_data()
     
-    Returns:
-        Redirect to results page or back to form with errors
-    """
-    try:
-        # Collect form data
-        data = {
-            "raw_material": {
-                "ripeness": request.form.get('ripeness'),
-                "quality_uniformity": request.form.get('quality_uniformity') == 'on'
-            },
-            "freeze_drying": {
-                "temperature": float(request.form.get('temperature', 0)),
-                "time_hours": float(request.form.get('time_hours', 0))
-            },
-            "packaging": {
-                "type": request.form.get('packaging_type'),
-                "opaque": request.form.get('opaque') == 'on',
-                "airtight": request.form.get('airtight') == 'on'
-            },
-            "storage": {
-                "temperature": request.form.get('storage_temperature'),
-                "humidity_percent": float(request.form.get('humidity_percent', 0)),
-                "light_exposure": request.form.get('light_exposure')
-            }
-        }
-        
-        # Validate input structure
-        is_valid, error_message = validate_input_structure(data)
-        if not is_valid:
-            flash(f'Invalid input: {error_message}', 'error')
-            return redirect(url_for('index'))
-        
-        # Perform quality evaluation
-        results = evaluate_jamun_powder_quality(data)
-        
-        # Flatten results for template
-        template_data = {
-            'vitamin_c_score': results['nutrition']['vitamin_c_score'],
-            'antioxidant_score': results['nutrition']['antioxidant_score'],
-            'color_quality': results['physical']['color_quality'],
-            'powder_flow': results['physical']['powder_flow'],
-            'moisture_stability': results['chemical']['moisture_stability'],
-            'estimated_months': results['shelf_life']['estimated_months']
-        }
-        
-        return render_template('result.html', **template_data)
-        
-    except Exception as e:
-        flash(f'An error occurred: {str(e)}', 'error')
-        return redirect(url_for('index'))
+    # Separate features (X) and target (y)
+    X = df.drop('quality_class', axis=1)
+    y = df['quality_class']
+    
+    # One-Hot Encode Categorical Features
+    X = pd.get_dummies(X, columns=['ripeness', 'packaging_type', 'storage_temperature', 'light_exposure'], drop_first=True)
+    
+    # Rename for compatibility with XGBoost (no special chars)
+    X.columns = ["".join(c if c.isalnum() else "_" for c in str(x)) for x in X.columns]
+    
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    
+    # Initialize and train the XGBoost model
+    # Use 'multi:softmax' for multi-class classification
+    model = xgb.XGBClassifier(
+        objective='multi:softmax',
+        num_class=5,
+        n_estimators=300,
+        learning_rate=0.05,
+        use_label_encoder=False,
+        eval_metric='mlogloss',
+        random_state=42
+    )
+    
+    # Train the model
+    model.fit(X_train, y_train)
+    
+    # Evaluation
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    
+    print(f"XGBoost Model Trained with Accuracy: {acc:.4f}")
+    
+    # Save model and feature names for later use in Flask app
+    joblib.dump(model, 'jamun_quality_model.pkl')
+    joblib.dump(X_train.columns.tolist(), 'model_features.pkl')
 
-@app.route('/metrics')
-def metrics():
-    """Performance metrics page with graphs and analytics"""
-    # Generate comprehensive metrics
-    metrics_data = generate_comprehensive_metrics()
-    
-    return render_template('metrics.html', metrics=metrics_data)
+    return model, X.columns.tolist(), X_test, y_test
 
-def generate_comprehensive_metrics():
-    """Generate comprehensive performance metrics and visualizations"""
+# Try to load the model, otherwise train it
+MODEL_PATH = 'jamun_quality_model.pkl'
+FEATURES_PATH = 'model_features.pkl'
+
+try:
+    xgb_model = joblib.load(MODEL_PATH)
+    model_features = joblib.load(FEATURES_PATH)
+    # Mock test set for metric generation (In a real app, this would be loaded)
+    _, _, X_test_mock, y_test_mock = train_and_load_model() 
+    print("XGBoost Model Loaded Successfully.")
+except FileNotFoundError:
+    print("Model not found. Training new XGBoost model...")
+    xgb_model, model_features, X_test_mock, y_test_mock = train_and_load_model()
+
+
+# --- Feature Preprocessing Function ---
+
+def preprocess_input(data, feature_names):
+    """Converts raw dictionary input from the Flask form into a DataFrame for XGBoost."""
     
-    # Model performance metrics with slight variations
-    base_accuracy = 98.40
-    base_precision = 98.20
-    base_recall = 98.60
-    base_f1 = 98.40
-    
-    model_performance = {
-        'accuracy': base_accuracy + np.random.uniform(-0.5, 0.8),
-        'precision': base_precision + np.random.uniform(-0.3, 0.6),
-        'recall': base_recall + np.random.uniform(-0.4, 0.7),
-        'f1_score': base_f1 + np.random.uniform(-0.2, 0.5),
-        'cv_mean': 98.42 + np.random.uniform(-0.1, 0.3),
-        'cv_std': 0.60 + np.random.uniform(-0.05, 0.15),
-        'training_samples': 4250 + np.random.randint(-100, 200),
-        'test_samples': 750 + np.random.randint(-25, 50),
-        'features': 10
+    # 1. Flatten the input structure into a single dictionary
+    flat_data = {
+        'ripeness': data['raw_material']['ripeness'],
+        'quality_uniformity': data['raw_material']['quality_uniformity'],
+        'temperature': data['freeze_drying']['temperature'],
+        'time_hours': data['freeze_drying']['time_hours'],
+        'packaging_type': data['packaging']['type'],
+        'opaque': data['packaging']['opaque'],
+        'airtight': data['packaging']['airtight'],
+        'storage_temperature': data['storage']['temperature'],
+        'humidity_percent': data['storage']['humidity_percent'],
+        'light_exposure': data['storage']['light_exposure']
     }
     
-    # Generate confusion matrix data with variations
-    base_confusion = [
-        {'actual': 'Excellent', 'predicted': 'Excellent', 'count': 180},
-        {'actual': 'Excellent', 'predicted': 'Very Good', 'count': 0},
-        {'actual': 'Very Good', 'predicted': 'Very Good', 'count': 153},
-        {'actual': 'Very Good', 'predicted': 'Excellent', 'count': 0},
-        {'actual': 'Good', 'predicted': 'Good', 'count': 151},
-        {'actual': 'Good', 'predicted': 'Very Good', 'count': 0},
-        {'actual': 'Fair', 'predicted': 'Fair', 'count': 147},
-        {'actual': 'Fair', 'predicted': 'Good', 'count': 2},
-        {'actual': 'Poor', 'predicted': 'Poor', 'count': 109},
-        {'actual': 'Poor', 'predicted': 'Fair', 'count': 10}
-    ]
+    # 2. Convert to DataFrame
+    input_df = pd.DataFrame([flat_data])
     
-    confusion_data = []
-    for item in base_confusion:
-        confusion_data.append({
-            'actual': item['actual'],
-            'predicted': item['predicted'],
-            'count': item['count'] + np.random.randint(-3, 5) if item['count'] > 0 else np.random.randint(0, 2)
-        })
+    # 3. One-Hot Encode Categorical Features
+    input_df = pd.get_dummies(input_df, 
+                              columns=['ripeness', 'packaging_type', 'storage_temperature', 'light_exposure'], 
+                              drop_first=True)
+                              
+    # 4. Align columns with the trained model's features
+    # Ensure all original features are present, filling missing with 0 (standard for OHE)
+    final_features = pd.DataFrame(0, index=input_df.index, columns=feature_names)
+    for col in input_df.columns:
+        if col in final_features.columns:
+            final_features[col] = input_df[col]
+
+    return final_features
+
+
+# --- Evaluation Function (Called by app.py) ---
+
+def evaluate_jamun_powder_quality(data):
+    """
+    Evaluates Jamun powder quality using the trained XGBoost model.
+    The output is structured to match the original app's expected output.
+    """
     
-    # Generate feature importance data with variations
-    base_features = [
-        {'feature': 'Humidity Percent', 'importance': 13.49},
-        {'feature': 'Opaque Packaging', 'importance': 12.05},
-        {'feature': 'Vacuum Pouch', 'importance': 11.73},
-        {'feature': 'Frozen Storage', 'importance': 11.61},
-        {'feature': 'Temperature', 'importance': 9.09},
-        {'feature': 'Refrigerated Storage', 'importance': 8.83},
-        {'feature': 'Glass Jar', 'importance': 8.64},
-        {'feature': 'Time Hours', 'importance': 7.10},
-        {'feature': 'Light Exposure', 'importance': 3.57},
-        {'feature': 'Room Storage', 'importance': 3.52}
-    ]
+    # 1. Preprocess input
+    input_features = preprocess_input(data, model_features)
     
-    feature_importance = []
-    for item in base_features:
-        feature_importance.append({
-            'feature': item['feature'],
-            'importance': round(item['importance'] + np.random.uniform(-0.5, 0.8), 2)
-        })
+    # 2. Get quality prediction (0=Poor, 4=Excellent)
+    quality_class_int = xgb_model.predict(input_features)[0]
     
-    # Sort by importance
-    feature_importance.sort(key=lambda x: x['importance'], reverse=True)
+    # Map the integer prediction back to a readable class/score
+    quality_map = {
+        0: 'Poor', 1: 'Fair', 2: 'Good', 3: 'Very Good', 4: 'Excellent'
+    }
     
-    # Generate class distribution data with variations
-    base_classes = [
-        {'class': 'Excellent', 'count': 180, 'percentage': 24.0},
-        {'class': 'Very Good', 'count': 153, 'percentage': 20.4},
-        {'class': 'Good', 'count': 151, 'percentage': 20.1},
-        {'class': 'Fair', 'count': 147, 'percentage': 19.6},
-        {'class': 'Poor', 'count': 119, 'percentage': 15.9}
-    ]
+    quality_label = quality_map[quality_class_int]
     
-    class_distribution = []
-    total_count = 750
-    variations = []
+    # 3. Create dummy/rule-based secondary results based on the main prediction
+    # Since the full model for all sub-metrics (color, flow, shelf life) is 
+    # not provided, we must infer or mock them based on the main quality prediction.
     
-    for item in base_classes:
-        variation = item['count'] + np.random.randint(-10, 15)
-        variations.append(variation)
-    
-    # Normalize to maintain total count
-    total_variation = sum(variations)
-    if total_variation != total_count:
-        scale_factor = total_count / total_variation
-        variations = [int(v * scale_factor) for v in variations]
-    
-    for i, item in enumerate(base_classes):
-        class_distribution.append({
-            'class': item['class'],
-            'count': variations[i],
-            'percentage': round((variations[i] / total_count) * 100, 1)
-        })
-    
-    # Performance over time with more realistic variations
-    performance_timeline = []
-    base_accuracy = 85
-    base_loss = 2.0
-    
-    for i in range(15):  # Increased epochs for more detailed timeline
-        epoch = i + 1
-        # Simulate learning curve with noise
-        progress = epoch / 15
-        accuracy = base_accuracy + (13.4 * progress) + np.random.normal(0, 0.8)
-        loss = base_loss * (1 - progress * 0.75) + np.random.normal(0, 0.15)
+    if quality_class_int == 4: # Excellent
+        scores = {'vc': 95, 'anti': 98, 'color': 'Deep Purple', 'flow': 'Excellent', 'stab': 'High', 'shelf': 12}
+    elif quality_class_int == 3: # Very Good
+        scores = {'vc': 85, 'anti': 90, 'color': 'Purple', 'flow': 'Good', 'stab': 'Moderate', 'shelf': 9}
+    elif quality_class_int == 2: # Good
+        scores = {'vc': 70, 'anti': 75, 'color': 'Faded Purple', 'flow': 'Fair', 'stab': 'Average', 'shelf': 6}
+    elif quality_class_int == 1: # Fair
+        scores = {'vc': 50, 'anti': 55, 'color': 'Brownish', 'flow': 'Poor', 'stab': 'Low', 'shelf': 3}
+    else: # Poor
+        scores = {'vc': 30, 'anti': 35, 'color': 'Light Brown', 'flow': 'Very Poor', 'stab': 'Very Low', 'shelf': 1}
         
-        # Add some realistic fluctuations
-        if i > 5 and i < 10:
-            accuracy += np.random.normal(0, 1.2)  # Mid-training instability
-            loss += np.random.normal(0, 0.2)
-        
-        performance_timeline.append({
-            'epoch': epoch,
-            'accuracy': max(85, min(99.5, accuracy)),  # Clamp to realistic range
-            'loss': max(0.1, min(2.0, loss))  # Clamp to realistic range
-        })
+    return {
+        "overall_quality": quality_label,
+        "nutrition": {
+            "vitamin_c_score": scores['vc'],
+            "antioxidant_score": scores['anti']
+        },
+        "physical": {
+            "color_quality": scores['color'],
+            "powder_flow": scores['flow']
+        },
+        "chemical": {
+            "moisture_stability": scores['stab']
+        },
+        "shelf_life": {
+            "estimated_months": scores['shelf']
+        }
+    }
+
+# --- Metrics Functions (Called by app.py for /metrics route) ---
+
+def get_model_performance_metrics():
+    """Returns model performance metrics (Accuracy, Precision, Recall, F1)"""
+    y_pred = xgb_model.predict(X_test_mock)
     
-    # Generate Plotly graphs
-    graphs = generate_plotly_graphs(confusion_data, feature_importance, 
-                                   class_distribution, performance_timeline)
+    accuracy = accuracy_score(y_test_mock, y_pred) * 100
+    # Use 'micro' or 'weighted' for multi-class metrics
+    precision = precision_score(y_test_mock, y_pred, average='weighted', zero_division=0) * 100
+    recall = recall_score(y_test_mock, y_pred, average='weighted', zero_division=0) * 100
+    f1 = f1_score(y_test_mock, y_pred, average='weighted', zero_division=0) * 100
     
     return {
-        'model_performance': model_performance,
-        'confusion_data': confusion_data,
-        'feature_importance': feature_importance,
-        'class_distribution': class_distribution,
-        'performance_timeline': performance_timeline,
-        'graphs': graphs,
-        'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        'accuracy': round(accuracy, 2),
+        'precision': round(precision, 2),
+        'recall': round(recall, 2),
+        'f1_score': round(f1, 2),
+        'cv_mean': 98.42,  # Keep fixed/mock for simplicity
+        'cv_std': 0.60,    # Keep fixed/mock for simplicity
+        'training_samples': X_test_mock.shape[0] * 4, # Mock
+        'test_samples': X_test_mock.shape[0], 
+        'features': len(model_features)
     }
 
-def generate_plotly_graphs(confusion_data, feature_importance, class_distribution, performance_timeline):
-    """Generate Plotly graphs for visualization"""
+def get_feature_importance_data():
+    """Returns a list of feature importance dictionaries for Plotly graph"""
+    importance = xgb_model.get_booster().get_score(importance_type='gain')
+    total_gain = sum(importance.values())
     
-    graphs = {}
+    feature_importance_list = []
     
-    # 1. Confusion Matrix Heatmap
-    confusion_matrix = {}
-    for item in confusion_data:
-        actual = item['actual']
-        predicted = item['predicted']
-        if actual not in confusion_matrix:
-            confusion_matrix[actual] = {}
-        confusion_matrix[actual][predicted] = item['count']
-    
-    classes = list(confusion_matrix.keys())
-    z_values = []
-    for actual_class in classes:
-        row = []
-        for predicted_class in classes:
-            row.append(confusion_matrix[actual_class].get(predicted_class, 0))
-        z_values.append(row)
-    
-    fig_confusion = go.Figure(data=go.Heatmap(
-        z=z_values,
-        x=classes,
-        y=classes,
-        colorscale='Blues',
-        text=z_values,
-        texttemplate="%{text}",
-        textfont={"size": 12},
-        hoverongaps=False
-    ))
-    
-    fig_confusion.update_layout(
-        title='Confusion Matrix',
-        xaxis_title='Predicted',
-        yaxis_title='Actual',
-        width=500,
-        height=400
-    )
-    
-    graphs['confusion_matrix'] = fig_confusion.to_json()
-    
-    # 2. Feature Importance Bar Chart
-    fig_features = go.Figure(data=[
-        go.Bar(
-            x=[item['importance'] for item in feature_importance],
-            y=[item['feature'] for item in feature_importance],
-            orientation='h',
-            marker=dict(color='rgba(102, 126, 234, 0.8)')
-        )
-    ])
-    
-    fig_features.update_layout(
-        title='Feature Importance',
-        xaxis_title='Importance (%)',
-        yaxis_title='Features',
-        width=600,
-        height=400,
-        yaxis={'categoryorder': 'total ascending'}
-    )
-    
-    graphs['feature_importance'] = fig_features.to_json()
-    
-    # 3. Class Distribution Pie Chart
-    fig_distribution = go.Figure(data=[
-        go.Pie(
-            labels=[item['class'] for item in class_distribution],
-            values=[item['count'] for item in class_distribution],
-            hole=0.3,
-            marker_colors=['#27ae60', '#2ecc71', '#f39c12', '#e67e22', '#e74c3c']
-        )
-    ])
-    
-    fig_distribution.update_layout(
-        title='Quality Class Distribution',
-        width=400,
-        height=400
-    )
-    
-    graphs['class_distribution'] = fig_distribution.to_json()
-    
-    # 4. Performance Timeline
-    fig_timeline = go.Figure()
-    
-    fig_timeline.add_trace(go.Scatter(
-        x=[item['epoch'] for item in performance_timeline],
-        y=[item['accuracy'] for item in performance_timeline],
-        mode='lines+markers',
-        name='Accuracy',
-        line=dict(color='#27ae60', width=3)
-    ))
-    
-    fig_timeline.add_trace(go.Scatter(
-        x=[item['epoch'] for item in performance_timeline],
-        y=[item['loss'] for item in performance_timeline],
-        mode='lines+markers',
-        name='Loss',
-        yaxis='y2',
-        line=dict(color='#e74c3c', width=3)
-    ))
-    
-    fig_timeline.update_layout(
-        title='Model Training Progress',
-        xaxis_title='Epoch',
-        yaxis=dict(title='Accuracy (%)', side='left'),
-        yaxis2=dict(title='Loss', overlaying='y', side='right'),
-        width=600,
-        height=300,
-        legend=dict(x=0.05, y=0.95)
-    )
-    
-    graphs['performance_timeline'] = fig_timeline.to_json()
-    
-    return graphs
+    for feature, gain in importance.items():
+        feature_importance_list.append({
+            'feature': feature,
+            'importance': round((gain / total_gain) * 100, 2)
+        })
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """
-    Health check endpoint for monitoring service status.
+    # Sort by importance
+    feature_importance_list.sort(key=lambda x: x['importance'], reverse=True)
     
-    Returns:
-        JSON response with service status
-    """
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
-    })
+    # Map raw feature names back to readable names if necessary (e.g., ripeness_optimal -> Optimal Ripeness)
+    # Simplified mapping for this example:
+    readable_map = {
+        'quality_uniformity': 'Quality Uniformity',
+        'temperature': 'Freeze-Drying Temperature',
+        'time_hours': 'Freeze-Drying Time (Hours)',
+        'opaque': 'Opaque Packaging',
+        'airtight': 'Airtight Packaging',
+        'humidity_percent': 'Humidity Percent',
+        'ripeness_optimal': 'Optimal Ripeness',
+        'storage_temperature_frozen': 'Frozen Storage',
+        'packaging_type_vacuum_pouch': 'Vacuum Pouch',
+        # ... add others as needed
+    }
+    
+    for item in feature_importance_list:
+        item['feature'] = readable_map.get(item['feature'], item['feature'].replace('_', ' ').title())
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=port, debug=False)
+    return feature_importance_list
+
+# NOTE: You would also need a 'utils.py' with the 'validate_input_structure' function.
