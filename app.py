@@ -1,12 +1,17 @@
 """
 Flask web application for evaluating freeze-dried Jamun powder quality.
 Provides web interface with forms for input and result display.
+
+NOTE: This app.py file remains largely the same, but the implementation of
+      'evaluate_jamun_powder_quality' in 'rules.py' is replaced with XGBoost.
 """
 
 import os
 from flask import Flask, request, render_template, redirect, url_for, flash, jsonify
+# The 'rules' module now contains the XGBoost model logic
 from utils import validate_input_structure
-from rules import evaluate_jamun_powder_quality
+from rules import evaluate_jamun_powder_quality, get_model_performance_metrics, get_feature_importance_data 
+# Note: Added imports for new functions to get real model metrics
 import plotly.graph_objs as go
 import plotly.utils
 import numpy as np
@@ -21,27 +26,18 @@ app.secret_key = 'jamun_powder_evaluator_secret_key'
 # Configure for deployment
 port = int(os.environ.get('PORT', 5000))
 
+# --- Application Routes (No changes needed here for the input/output logic) ---
+
 @app.route('/', methods=['GET'])
 def index():
-    """
-    Home page with input form for Jamun powder quality evaluation.
-    
-    Returns:
-        Rendered HTML template with input form
-    """
+    """Home page with input form for Jamun powder quality evaluation."""
     return render_template('index.html')
 
 @app.route('/evaluate', methods=['POST'])
 def evaluate():
-    """
-    Evaluate Jamun powder quality based on form input.
-    Processes form data and redirects to results page.
-    
-    Returns:
-        Redirect to results page or back to form with errors
-    """
+    """Evaluate Jamun powder quality based on form input."""
     try:
-        # Collect form data
+        # Collect form data - SAME LOGIC
         data = {
             "raw_material": {
                 "ripeness": request.form.get('ripeness'),
@@ -69,10 +65,10 @@ def evaluate():
             flash(f'Invalid input: {error_message}', 'error')
             return redirect(url_for('index'))
         
-        # Perform quality evaluation
+        # Perform quality evaluation - THIS CALLS THE XGBOOST LOGIC IN rules.py
         results = evaluate_jamun_powder_quality(data)
         
-        # Flatten results for template
+        # Flatten results for template - SAME STRUCTURE
         template_data = {
             'vitamin_c_score': results['nutrition']['vitamin_c_score'],
             'antioxidant_score': results['nutrition']['antioxidant_score'],
@@ -85,6 +81,7 @@ def evaluate():
         return render_template('result.html', **template_data)
         
     except Exception as e:
+        # Catch exception and display error
         flash(f'An error occurred: {str(e)}', 'error')
         return redirect(url_for('index'))
 
@@ -99,25 +96,22 @@ def metrics():
 def generate_comprehensive_metrics():
     """Generate comprehensive performance metrics and visualizations"""
     
-    # Model performance metrics with slight variations
-    base_accuracy = 98.40
-    base_precision = 98.20
-    base_recall = 98.60
-    base_f1 = 98.40
+    # 1. Model performance metrics (Now fetched from the model logic)
+    model_performance = get_model_performance_metrics()
     
-    model_performance = {
-        'accuracy': base_accuracy + np.random.uniform(-0.5, 0.8),
-        'precision': base_precision + np.random.uniform(-0.3, 0.6),
-        'recall': base_recall + np.random.uniform(-0.4, 0.7),
-        'f1_score': base_f1 + np.random.uniform(-0.2, 0.5),
-        'cv_mean': 98.42 + np.random.uniform(-0.1, 0.3),
-        'cv_std': 0.60 + np.random.uniform(-0.05, 0.15),
-        'training_samples': 4250 + np.random.randint(-100, 200),
-        'test_samples': 750 + np.random.randint(-25, 50),
-        'features': 10
-    }
+    # The rest of the metrics generation logic (confusion matrix, class distribution, 
+    # and performance timeline) will use the same data structures but may use 
+    # real data provided by the XGBoost training/evaluation process, 
+    # instead of the random generation. 
+    # For simplicity and to fit the previous structure, we'll keep the random 
+    # elements but replace 'feature_importance' with a real call.
+
+    # 2. Get real feature importance from the model
+    feature_importance = get_feature_importance_data()
+
+    # --- Dummy Data Generation (To keep the page working with the old structure) ---
     
-    # Generate confusion matrix data with variations
+    # Generate confusion matrix data with variations (KEEPING THE DUMMY STRUCTURE)
     base_confusion = [
         {'actual': 'Excellent', 'predicted': 'Excellent', 'count': 180},
         {'actual': 'Excellent', 'predicted': 'Very Good', 'count': 0},
@@ -138,32 +132,8 @@ def generate_comprehensive_metrics():
             'predicted': item['predicted'],
             'count': item['count'] + np.random.randint(-3, 5) if item['count'] > 0 else np.random.randint(0, 2)
         })
-    
-    # Generate feature importance data with variations
-    base_features = [
-        {'feature': 'Humidity Percent', 'importance': 13.49},
-        {'feature': 'Opaque Packaging', 'importance': 12.05},
-        {'feature': 'Vacuum Pouch', 'importance': 11.73},
-        {'feature': 'Frozen Storage', 'importance': 11.61},
-        {'feature': 'Temperature', 'importance': 9.09},
-        {'feature': 'Refrigerated Storage', 'importance': 8.83},
-        {'feature': 'Glass Jar', 'importance': 8.64},
-        {'feature': 'Time Hours', 'importance': 7.10},
-        {'feature': 'Light Exposure', 'importance': 3.57},
-        {'feature': 'Room Storage', 'importance': 3.52}
-    ]
-    
-    feature_importance = []
-    for item in base_features:
-        feature_importance.append({
-            'feature': item['feature'],
-            'importance': round(item['importance'] + np.random.uniform(-0.5, 0.8), 2)
-        })
-    
-    # Sort by importance
-    feature_importance.sort(key=lambda x: x['importance'], reverse=True)
-    
-    # Generate class distribution data with variations
+
+    # Generate class distribution data with variations (KEEPING THE DUMMY STRUCTURE)
     base_classes = [
         {'class': 'Excellent', 'count': 180, 'percentage': 24.0},
         {'class': 'Very Good', 'count': 153, 'percentage': 20.4},
@@ -193,7 +163,7 @@ def generate_comprehensive_metrics():
             'percentage': round((variations[i] / total_count) * 100, 1)
         })
     
-    # Performance over time with more realistic variations
+    # Performance over time with more realistic variations (KEEPING THE DUMMY STRUCTURE)
     performance_timeline = []
     base_accuracy = 85
     base_loss = 2.0
@@ -216,7 +186,7 @@ def generate_comprehensive_metrics():
             'loss': max(0.1, min(2.0, loss))  # Clamp to realistic range
         })
     
-    # Generate Plotly graphs
+    # Generate Plotly graphs - SAME LOGIC
     graphs = generate_plotly_graphs(confusion_data, feature_importance, 
                                    class_distribution, performance_timeline)
     
@@ -230,9 +200,10 @@ def generate_comprehensive_metrics():
         'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
 
+# --- Plotly Graph Generation (Unchanged) ---
 def generate_plotly_graphs(confusion_data, feature_importance, class_distribution, performance_timeline):
     """Generate Plotly graphs for visualization"""
-    
+    # ... (Plotly code remains identical) ...
     graphs = {}
     
     # 1. Confusion Matrix Heatmap
@@ -244,7 +215,7 @@ def generate_plotly_graphs(confusion_data, feature_importance, class_distributio
             confusion_matrix[actual] = {}
         confusion_matrix[actual][predicted] = item['count']
     
-    classes = list(confusion_matrix.keys())
+    classes = sorted(list(confusion_matrix.keys())) # Sort for consistent visualization
     z_values = []
     for actual_class in classes:
         row = []
@@ -346,14 +317,10 @@ def generate_plotly_graphs(confusion_data, feature_importance, class_distributio
     
     return graphs
 
+
 @app.route('/health', methods=['GET'])
 def health_check():
-    """
-    Health check endpoint for monitoring service status.
-    
-    Returns:
-        JSON response with service status
-    """
+    """Health check endpoint for monitoring service status."""
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
